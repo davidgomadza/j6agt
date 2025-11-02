@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AGT Wallet — Final</title>
+  <meta name="description" content="AGT Wallet with J6 issuer and initial wallet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha3/0.8.0/sha3.min.js"></script>
+  <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
+
+  <style>
+    :root{--bg:#0a0a1a;--card:#1a1a2e;--accent:#6a5af9;--muted:#a0a0d0;--text:#e0e0ff;--danger:#ff6666}
+    body{background:var(--bg);color:var(--text);font-family:Segoe UI,system-ui,Arial;padding:18px;margin:0}
+    .container{max-width:900px;margin:0 auto;background:#121224;padding:20px;border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,.6)}
+    h1{color:var(--accent);margin:0 0 6px}
+    .subtitle{color:var(--muted);margin-bottom:12px}
+    .tabs{display:flex;gap:8px;margin-bottom:12px}
+    .tab{padding:10px 14px;background:#252540;border-radius:8px;cursor:pointer}
+    .tab.active{background:var(--card);color:var(--accent)}
+    .card{background:var(--card);padding:14px;border-radius:10px;margin-bottom:12px}
+    input,select,textarea,button{width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#0f1224;color:var(--text)}
+    button{background:var(--accent);border:none;color:#fff;cursor:pointer}
+    .result{background:#071024;padding:12px;border-radius:8px;font-family:monospace;white-space:pre-wrap;margin-top:10px}
+    .muted{color:var(--muted);font-size:13px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:6px;border-bottom:1px solid #141426;text-align:left}
+    th{color:var(--accent)}
+    .warning{color:var(--danger);background:rgba(255,102,102,0.06);padding:8px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔐 AGT Wallet — Final</h1>
+    <div class="subtitle">Demo: deterministic J6 labels, initial wallet preloaded with tokens.</div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="showTab(event,'wallet')">Wallet</div>
+      <div class="tab" onclick="showTab(event,'send')">Send</div>
+      <div class="tab" onclick="showTab(event,'ledger')">Ledger</div>
+    </div>
+
+    <!-- Initial Wallet Placeholder -->
+    <div class="card">
+      <h3>🪙 Initial Wallet (Preloaded)</h3>
+      <div class="muted">This wallet is preloaded into the demo on page load.</div>
+      <textarea id="initialWalletData" rows="6"></textarea>
+      <button onclick="loadInitialWallet()">Load Initial Wallet (from textarea)</button>
+      <div id="initialWalletResult" class="result">Initial wallet will be loaded automatically when the page loads.</div>
+    </div>
+
+    <!-- Wallet tab content -->
+    <div id="tab-wallet" class="tab-content">
+      <div class="card">
+        <h3>Create / Import</h3>
+        <button onclick="createWallet()">Generate New Wallet</button>
+        <button onclick="importWallet()">Import Recovery Phrase</button>
+        <div id="walletResult" class="result">No wallet created/imported yet.</div>
+      </div>
+
+      <div class="card">
+        <h3>Check Balance (Demo/local or on-chain if Alchemy key)</h3>
+        <select id="assetSelect">
+          <option value="MATIC">MATIC</option>
+          <option value="AGT">AGT</option>
+          <option value="S96t'">S96t'</option>
+          <option value="BTCYT">BTCYT</option>
+          <option value="BTC">BTC</option>
+          <option value="GTPS">GTPS</option>
+          <option value="AGOLD">AGOLD</option>
+        </select>
+        <button onclick="checkBalance()">Check Balance</button>
+        <div id="balanceResult" class="result">No balance checked yet.</div>
+      </div>
+    </div>
+
+    <!-- Send -->
+    <div id="tab-send" class="tab-content" style="display:none;">
+      <div class="card">
+        <h3>Send (Demo)</h3>
+        <input id="toAddress" placeholder="Recipient (J6... or 0x...)" />
+        <input id="sendAmount" placeholder="Amount (integer for demo tokens or decimal for MATIC)" />
+        <select id="sendAsset">
+          <option value="MATIC">MATIC</option>
+          <option value="AGT">AGT</option>
+          <option value="S96t'">S96t'</option>
+          <option value="BTCYT">BTCYT</option>
+          <option value="BTC">BTC</option>
+          <option value="GTPS">GTPS</option>
+          <option value="AGOLD">AGOLD</option>
+        </select>
+        <div class="warning">⚠️ Demo only: token transfers are simulated locally unless you provide a signing mnemonic.</div>
+        <button id="sendBtn" onclick="sendTransaction()">Send</button>
+        <div id="sendResult" class="result">No sends yet.</div>
+      </div>
+    </div>
+
+    <!-- Ledger -->
+    <div id="tab-ledger" class="tab-content" style="display:none;">
+      <div class="card">
+        <h3>Ledger (Simulation)</h3>
+        <button onclick="connectLedger()">Connect Ledger (simulate)</button>
+        <div id="ledgerResult" class="result">Not connected.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Token Set (demo)</h3>
+      <table>
+        <thead><tr><th>Token</th><th>Symbol</th><th>Initial (demo)</th></tr></thead>
+        <tbody id="tokenTable"></tbody>
+      </table>
+    </div>
+
+    <div class="warning" style="margin-top:12px">
+      Embedded Alchemy key present for demo (visible). Rotate the key after use.
+    </div>
+  </div>
+
+<script>
+/* =======================
+   Config and tokens
+   ======================= */
+const TOKENS = [
+  { name: "Advanced Genetic Synthesis Technology", symbol: "AGT", initial: "37867890284" },
+  { name: "Sealofapprovalis7628396t' S96t'", symbol: "S96t'", initial: "37867890284" },
+  { name: "Bitcoinayt", symbol: "BTCYT", initial: "37867890284" },
+  { name: "Bitcoin", symbol: "BTC", initial: "37867890284" },
+  { name: "Global Transaction Payment Solution", symbol: "GTPS", initial: "37867890284" },
+  { name: "AGT Gold", symbol: "AGOLD", initial: "37867890284" }
+];
+
+// show token table
+const tokenTable = document.getElementById('tokenTable');
+TOKENS.forEach(t => {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${t.name}</td><td>${t.symbol}</td><td>${t.initial}${t.symbol}</td>`;
+  tokenTable.appendChild(tr);
+});
+
+/* =======================
+   Provider (embedded as requested)
+   ======================= */
+const ALCHEMY_KEY = "g3gV2uw-5EQVL6XucJudv"; // embedded (visible) — rotate after deployment
+const NETWORK = "maticmum"; // polygon mumbai
+let provider = new ethers.providers.AlchemyProvider(NETWORK, ALCHEMY_KEY);
+
+/* =======================
+   Local/demo state
+   ======================= */
+let currentWallet = null; // will hold {wallet?, mnemonic?, j6Address, ethAddress, balances?}
+const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const TOKEN_ADDRESSES = {
+  AGT: '0xAgT12345678901234567890123456789012345678',
+  "S96t'": '0xS96T12345678901234567890123456789012345678',
+  BTCYT: '0xBTCYT123456789012345678901234567890123456',
+  BTC: '0xBTC12345678901234567890123456789012345678',
+  GTPS: '0xGTPS12345678901234567890123456789012345678',
+  AGOLD: '0xAGOLD12345678901234567890123456789012345678'
+};
+
+/* =======================
+   Tab switching (robust)
+   ======================= */
+function showTab(ev, tabId) {
+  // if first arg is string (called without event), shift
+  if (typeof ev === 'string') { tabId = ev; ev = null; }
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  const target = document.getElementById(`tab-${tabId}`);
+  if (target) target.style.display = 'block';
+  if (ev && ev.currentTarget) ev.currentTarget.classList.add('active');
+  else {
+    // fallback: find the tab element with text matching tabId and mark active (best-effort)
+    document.querySelectorAll('.tab').forEach(tab => {
+      if (tab.textContent.trim().toLowerCase() === tabId.toLowerCase()) tab.classList.add('active');
+    });
+  }
+}
+
+/* =======================
+   Deterministic J6 label (from mnemonic + index)
+   - In this demo the initial wallet will not contain a private key (unless you later add it).
+   ======================= */
+function keccakHex(input) {
+  return sha3.keccak256(input);
+}
+function makeJ6LabelFromPhraseAndIndex(phrase, index) {
+  const blob = keccakHex(`${phrase}::${index}`);
+  // convert hex -> chars from CHARSET
+  let label = 'J6';
+  for (let i = 0; label.length < 52; i++) {
+    const nibble = parseInt(blob[i % blob.length], 16);
+    label += CHARSET[nibble % CHARSET.length];
+  }
+  return label;
+}
+
+/* =======================
+   Initial wallet — THE ONE YOU PROVIDED
+   The J6 label will be preloaded with demo balances. This initial wallet
+   does not include a private key / mnemonic here (demo only). If you want
+   it to be able to sign transactions, provide the mnemonic or privateKey.
+   ======================= */
+
+const PROVIDED_J6 = "J6J1nif7Xr1YBoBxiBwFhy5WsWJUhn2Rhc3ylwnAlQkL4WF745Vx";
+const INITIAL_WALLET_OBJ = {
+  mnemonic: null, // not provided for safety
+  privateKey: null, // not provided
+  j6Address: PROVIDED_J6,
+  ethAddress: "0x0000000000000000000000000000000000000000", // placeholder — replace with real 0x... if available
+  balances: {
+    AGT: "37867890284",
+    "S96t'": "37867890284",
+    BTCYT: "37867890284",
+    BTC: "37867890284",
+    GTPS: "37867890284",
+    AGOLD: "37867890284"
+  }
+};
+
+// prefill textarea with the JSON to allow editing/loading
+document.getElementById('initialWalletData').value = JSON.stringify(INITIAL_WALLET_OBJ, null, 2);
+
+// function to load initial wallet (from textarea or object)
+function loadInitialWallet() {
+  const resultDiv = document.getElementById('initialWalletResult');
+  try {
+    const raw = document.getElementById('initialWalletData').value.trim();
+    const data = raw ? JSON.parse(raw) : INITIAL_WALLET_OBJ;
+    // allow missing privateKey/mnemonic — treat as view-only
+    if (!data.j6Address) throw new Error('Missing j6Address field in JSON');
+    currentWallet = {
+      wallet: (data.privateKey ? new ethers.Wallet(data.privateKey) : null),
+      mnemonic: data.mnemonic || null,
+      j6Address: data.j6Address,
+      ethAddress: data.ethAddress || "0x0000000000000000000000000000000000000000",
+      balances: data.balances || {}
+    };
+    resultDiv.className = 'result';
+    resultDiv.innerHTML = `✅ <strong>Initial wallet loaded</strong>\nJ6: ${currentWallet.j6Address}\nETH: ${currentWallet.ethAddress}\n\nBalances:\n` +
+      Object.entries(currentWallet.balances).map(([s,v]) => `${s}: ${v}`).join('\n');
+  } catch (e) {
+    resultDiv.className = 'result';
+    resultDiv.innerText = 'Failed to load initial wallet: ' + (e.message || e);
+  }
+}
+
+/* =======================
+   Create / Import wallet (demo uses ethers)
+   ======================= */
+function createWallet() {
+  const resultDiv = document.getElementById('walletResult');
+  try {
+    const w = ethers.Wallet.createRandom(); // v5 UMD
+    const mnemonic = w.mnemonic && w.mnemonic.phrase ? w.mnemonic.phrase : null;
+    const j6 = deriveJ6Address(mnemonic || Math.random().toString());
+    currentWallet = { wallet: w, mnemonic, j6Address: j6, ethAddress: w.address, balances: {} };
+    resultDiv.className = 'result';
+    resultDiv.innerHTML = `<strong>J6:</strong> ${j6}\n<strong>ETH:</strong> ${w.address}\n\n⚠️ Save mnemonic:\n${mnemonic}`;
+  } catch (e) {
+    resultDiv.className = 'result';
+    resultDiv.innerText = 'Create failed: ' + (e.message||e);
+  }
+}
+
+function importWallet() {
+  const phrase = prompt('Enter your 12/24-word recovery phrase:');
+  if (!phrase) return;
+  const resultDiv = document.getElementById('walletResult');
+  try {
+    const w = ethers.Wallet.fromMnemonic(phrase);
+    const j6 = deriveJ6Address(phrase);
+    currentWallet = { wallet: w, mnemonic: phrase, j6Address: j6, ethAddress: w.address, balances: {} };
+    resultDiv.className = 'result';
+    resultDiv.innerHTML = `<strong>J6:</strong> ${j6}\n<strong>ETH:</strong> ${w.address}`;
+  } catch (e) {
+    resultDiv.className = 'result';
+    resultDiv.innerText = 'Import failed: ' + (e.message||e);
+  }
+}
+
+/* =======================
+   DeriveJ6Address (legacy helper used above)
+   ======================= */
+function deriveJ6Address(mnemonic) {
+  // produce 50 chars after 'J6'
+  const hash = sha3.keccak256(mnemonic || Math.random().toString());
+  let j6 = 'J6';
+  for (let i=0; i<50; i++) {
+    const idx = parseInt(hash[i % hash.length], 16) % CHARSET.length;
+    j6 += CHARSET[idx];
+  }
+  return j6;
+}
+
+/* =======================
+   Check balance (local first, then on-chain if possible)
+   ======================= */
+async function checkBalance() {
+  const resultDiv = document.getElementById('balanceResult');
+  if (!currentWallet) {
+    resultDiv.innerText = '❌ No wallet loaded. Load initial wallet or create/import one.';
+    return;
+  }
+  const asset = document.getElementById('assetSelect').value;
+  resultDiv.innerText = 'Checking...';
+
+  try {
+    // If we have a demo local balance, show it
+    if (currentWallet.balances && currentWallet.balances.hasOwnProperty(asset)) {
+      resultDiv.innerText = `✅ (local) ${currentWallet.balances[asset]} ${asset}`;
+      return;
+    }
+
+    // If asset is MATIC and we have an ETH address and provider -> check on-chain
+    if (asset === 'MATIC' && currentWallet.ethAddress && provider) {
+      const bal = await provider.getBalance(currentWallet.ethAddress);
+      resultDiv.innerText = `✅ ${ethers.utils.formatEther(bal)} MATIC (on-chain)`;
+      return;
+    }
+
+    // If ERC20 token and we have provider and token address, try on-chain balanceOf
+    if (TOKEN_ADDRESSES[asset] && provider && currentWallet.ethAddress) {
+      const contract = new ethers.Contract(TOKEN_ADDRESSES[asset], ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
+      const [raw, decimals] = await Promise.all([
+        contract.balanceOf(currentWallet.ethAddress).catch(()=>null),
+        contract.decimals().catch(()=>18)
+      ]);
+      if (raw !== null) {
+        const formatted = ethers.utils.formatUnits(raw, decimals);
+        resultDiv.innerText = `✅ ${formatted} ${asset} (on-chain)`;
+        return;
+      }
+    }
+
+    resultDiv.innerText = 'ℹ️ No local balance found for this asset; on-chain lookup unavailable or returned no data.';
+  } catch (e) {
+    resultDiv.innerText = 'Check failed: ' + (e.message || e);
+  }
+}
+
+/* =======================
+   Send transaction (demo)
+   - If currentWallet.wallet exists (has privateKey), can sign on-chain for MATIC or tokens (needs proper token contract addresses).
+   - If recipient is J6 and matches initial wallet or any loaded mapping, we simulate token transfer by adjusting balances in-memory.
+   ======================= */
+async function sendTransaction() {
+  const res = document.getElementById('sendResult');
+  if (!currentWallet) { res.innerText = '❌ No wallet loaded.'; return; }
+
+  let to = document.getElementById('toAddress').value.trim();
+  const amountRaw = document.getElementById('sendAmount').value.trim();
+  const asset = document.getElementById('sendAsset').value;
+  if (!to || !amountRaw) { res.innerText = '❌ Provide recipient and amount.'; return; }
+  // numeric amount handling
+  const isMatic = (asset === 'MATIC');
+  // For demo tokens treat amounts as integers (strings)
+  if (!isMatic && !/^\d+$/.test(amountRaw)) {
+    res.innerText = '❌ For demo token transfers use integer amounts.';
+    return;
+  }
+
+  // If recipient is J6 and matches our initial wallet J6, resolve to ETH placeholder
+  if (to.startsWith('J6')) {
+    if (to === currentWallet.j6Address) {
+      // sending to self
+      res.innerText = 'ℹ️ Recipient is the same as sender (no-op).';
+      return;
+    }
+    // For demo: if user wants to send to the preloaded J6, we only support adjusting balances locally if both sides are in memory.
+    if (to === INITIAL_WALLET_OBJ.j6Address) {
+      // perform local balance adjustments between currentWallet (sender) and initial wallet (receiver)
+      // Ensure both have balances objects
+      if (!currentWallet.balances) currentWallet.balances = {};
+      let receiverBalances = INITIAL_WALLET_OBJ.balances;
+      // ensure numeric BigInt-like ops
+      const sendAmount = BigInt(amountRaw);
+      const senderBalance = BigInt(currentWallet.balances[asset] || "0");
+      if (senderBalance < sendAmount) { res.innerText = '❌ Insufficient demo balance.'; return; }
+      currentWallet.balances[asset] = (senderBalance - sendAmount).toString();
+      receiverBalances[asset] = (BigInt(receiverBalances[asset] || "0") + sendAmount).toString();
+      res.innerText = `✅ Demo-transfer: ${amountRaw} ${asset} sent to ${to} (local simulated)`;
+      return;
+    }
+
+    // If J6 unknown, inform user
+    res.innerText = '❌ J6 recipient not recognized in demo (only the preloaded J6 is recognized).';
+    return;
+  }
+
+  // If recipient is 0x... and currentWallet has private key, perform on-chain send (MATIC)
+  if (ethers.utils.isAddress(to)) {
+    if (!currentWallet.wallet) { res.innerText = '❌ No signing key available in current wallet for on-chain transaction.'; return; }
+    try {
+      const providerLocal = provider; // Alchemy provider
+      const signer = currentWallet.wallet.connect(providerLocal);
+      if (isMatic) {
+        const tx = await signer.sendTransaction({ to, value: ethers.utils.parseEther(amountRaw) });
+        res.innerText = `✅ Sent MATIC tx: ${tx.hash}`;
+      } else {
+        // For ERC20 on-chain transfer, token contract addresses are placeholders — this requires real token contracts.
+        res.innerText = 'ℹ️ ERC-20 on-chain transfer not configured (token contract addresses are placeholders).';
+      }
+    } catch (e) {
+      res.innerText = 'Send failed: ' + (e.message || e);
+    }
+    return;
+  }
+
+  res.innerText = '❌ Recipient not valid (must be J6... or 0x...)';
+}
+
+/* =======================
+   Ledger simulation
+   ======================= */
+function connectLedger() {
+  const el = document.getElementById('ledgerResult');
+  el.innerText = 'Simulating Ledger connection...';
+  setTimeout(()=> {
+    el.innerText = '✅ Ledger simulated as connected. (Demo only)';
+  }, 1000);
+}
+
+/* =======================
+   On load: load initial wallet automatically
+   ======================= */
+window.addEventListener('load', () => {
+  loadInitialWallet(); // loads INITIAL_WALLET_OBJ by default (pre-filled)
+});
+</script>
+</body>
+</html>
